@@ -1,10 +1,13 @@
 
+import datetime
 import pandas as pd
 import os
 import joblib
-from flask import Flask, request, render_template
+from flask import Flask, request, render_template,send_file, url_for
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
+from fpdf import FPDF
+import matplotlib.pyplot as plt
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -32,7 +35,17 @@ def upload_file():
             file.save(filepath)
             data = pd.read_excel(filepath, engine='openpyxl')
             predictions = predict_air_quality(data)
-            return render_template('results.html', tables=[predictions.to_html(classes='data')], titles=predictions.columns.values)
+            # Generate PDF report
+            pdf_filename = os.path.join('uploads', 'air_quality_report.pdf')
+            generate_pdf(predictions, pdf_filename)
+            # return render_template('results.html', tables=[predictions.to_html(classes='data')], titles=predictions.columns.values)
+            # Render predictions and provide PDF download link
+            return render_template(
+                'results.html',
+                tables=[predictions.to_html(classes='data')],
+                titles=predictions.columns.values,
+                pdf_url=url_for('download_file', filename='air_quality_report.pdf')
+            )
     return render_template('upload.html')
 
 
@@ -95,7 +108,19 @@ def preprocess_data(data):
     data_scaled = scaler.fit_transform(data)
 
     return data_scaled
-
+def categorize_aqi(predictions):
+    """
+    Categorize AQI values into predefined buckets.
+    """
+    categories = []
+    for value in predictions:
+        if value <= 50:
+            categories.append('Good')
+        elif 51 <= value <= 100:
+            categories.append('Moderate')
+        else:
+            categories.append('Unhealthy')
+    return categories
 
 def predict_air_quality(data):
     """
@@ -103,14 +128,65 @@ def predict_air_quality(data):
     """
     # Preprocess the input data to match the model's expected format
     data_scaled = preprocess_data(data)
-
     # Predict using the loaded model
     predictions = model.predict(data_scaled)
-
     # Add predictions to the original dataframe
-    data['Predicted_AQI_Bucket'] = predictions
+    # data['Predicted_AQI_Bucket'] = predictions
+    data['Predicted_AQI_Bucket'] = categorize_aqi(predictions)
     return data
 
+def generate_pdf(data, filename):
+    """
+    Generate a summarized PDF report for air quality predictions.
+    """
+    class PDF(FPDF):
+        def header(self):
+            self.set_font('Arial', 'B', 14)
+            self.cell(0, 10, 'Air Quality Prediction Summary Report', border=False, ln=True, align='C')
+            self.ln(10)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('Arial', 'I', 8)
+            self.cell(0, 10, f'Page {self.page_no()}', border=False, align='C')
+
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_font('Arial', '', 12)
+
+    # General summary
+    total_records = len(data)
+    exceeds_who_count = data['Exceeds_WHO'].sum()
+    
+    pdf.cell(0, 10, f'Total records processed: {total_records}', ln=True)
+    pdf.cell(0, 10, f'Records exceeding WHO thresholds: {exceeds_who_count}', ln=True)
+    pdf.ln(10)
+
+    # Pollutant-specific summary
+    pdf.cell(0, 10, 'Pollutant Summary (Average, Min, Max):', ln=True)
+    for pollutant in ['PM2.5', 'PM10', 'NO2', 'SO2', 'O3', 'CO']:
+        avg_value = data[pollutant].mean()
+        min_value = data[pollutant].min()
+        max_value = data[pollutant].max()
+        pdf.cell(0, 10, f'  {pollutant}: Avg={avg_value:.2f}, Min={min_value}, Max={max_value}', ln=True)
+    pdf.ln(10)
+
+    # Predicted AQI buckets summary
+    pdf.cell(0, 10, 'Predicted AQI Buckets:', ln=True)
+    aqi_counts = data['Predicted_AQI_Bucket'].value_counts()
+    for bucket, count in aqi_counts.items():
+        pdf.cell(0, 10, f'  {bucket}: {count}', ln=True)
+
+    # Save the PDF to the specified filename
+    pdf.output(filename)
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    """
+    Route to download the generated PDF file.
+    """
+    filepath = os.path.join('uploads', filename)
+    return send_file(filepath, as_attachment=True)
 
 if __name__ == '__main__':
     if not os.path.exists('uploads'):
