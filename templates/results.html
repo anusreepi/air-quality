@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Air Quality Predictions</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h2>Air Quality Predictions</h2>
+        <p>The following table shows the predicted AQI Bucket based on the uploaded data:</p>
+        
+        <table class="table table-bordered">
+            <thead>
+                <tr>
+                    {% for title in titles %}
+                        <th>{{ title }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in tables[0].split('<tr>')[1:] %}
+                    <tr>
+                        {% for cell in row.split('<td>')[1:] %}
+                            <td>{{ cell.split('</td>')[0] }}</td>
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <a href="/" class="btn btn-primary">Upload Another File</a>
+    </div>
+</body>
+</html>
