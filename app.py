@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 app = Flask(__name__)
 
 # Load the saved model and scaler
-model = joblib.load('air_quality_model.pkl')
+model = joblib.load('air_quality_xgb_model.pkl')
 scaler = joblib.load('scaler.pkl')  # Assuming scaler was saved separately
 
 # WHO thresholds for pollutants
@@ -56,9 +56,11 @@ def preprocess_data(data):
     # Step 1: Extract 'Day', 'Month', 'Year' if 'Date' exists
     if 'Date' in data.columns:
         data['Date'] = pd.to_datetime(data['Date'])
-        data['Day'] = data['Date'].dt.day
-        data['Month'] = data['Date'].dt.month
         data['Year'] = data['Date'].dt.year
+        data['Month'] = data['Date'].dt.month
+        data['Day'] = data['Date'].dt.day
+        
+        
 
     
 
@@ -70,19 +72,27 @@ def preprocess_data(data):
     if len(num_cols) == 0:
         raise ValueError("No numeric columns found for imputation!")
 
-    
+    # Step 4: Add PM2.5/PM10 ratio feature
+    data['PM2.5/PM10'] = data['PM2.5'] / data['PM10']
+
+    # Step 5: Create lag features for specified pollutants
+    for pollutant in ['PM2.5', 'PM10', 'NO2', 'SO2', 'CO', 'O3']:
+        data[f'{pollutant}_lag1'] = data[pollutant].shift(1)
+
+    # Step 6: Remove any rows with NaN values due to lagging
+    data.dropna(inplace=True)
 
     # Step 5: Create the target variable 'Exceeds_WHO' based on WHO thresholds
-    data['Exceeds_WHO'] = (
-    (data['PM2.5'] > WHO_thresholds['PM2.5']) |
-    (data['PM10'] > WHO_thresholds['PM10']) |
-    (data['NO2'] > WHO_thresholds['NO2']) |
-    (data['SO2'] > WHO_thresholds['SO2']) |
-    (data['O3'] > WHO_thresholds['O3']) |
-    (data['CO'] > WHO_thresholds['CO'])
-        ).astype(int)
+    # data['Exceeds_WHO'] = (
+    # (data['PM2.5'] > WHO_thresholds['PM2.5']) |
+    # (data['PM10'] > WHO_thresholds['PM10']) |
+    # (data['NO2'] > WHO_thresholds['NO2']) |
+    # (data['SO2'] > WHO_thresholds['SO2']) |
+    # (data['O3'] > WHO_thresholds['O3']) |
+    # (data['CO'] > WHO_thresholds['CO'])
+    #     ).astype(int)
     # Step 2: Drop unnecessary columns ('City', 'AQI', 'AQI_Bucket') from the dataset
-    data = data.drop(columns=['City', 'Date', 'AQI', 'AQI_Bucket','Exceeds_WHO'], errors='ignore')
+    data = data.drop(columns=['City', 'Date', 'AQI', 'AQI_Bucket'], errors='ignore')
    # Impute missing values for numerical columns
     imputer = SimpleImputer(strategy='median')
     data = pd.DataFrame(imputer.fit_transform(data), columns=data.columns)
@@ -105,21 +115,23 @@ def preprocess_data(data):
     # data = data[required_columns]  # Ensure column order matches the training data
 
     # Step 8: Scale the data using the same scaler used during training
-    data_scaled = scaler.fit_transform(data)
+    # data_scaled = scaler.fit_transform(data)
 
-    return data_scaled
+    return data
 def categorize_aqi(predictions):
     """
     Categorize AQI values into predefined buckets.
     """
     categories = []
     for value in predictions:
-        if value <= 50:
-            categories.append('Good')
-        elif 51 <= value <= 100:
-            categories.append('Moderate')
+        if value <= 80:
+            categories.append('Low')
+        elif 81 <= value <= 100:
+            categories.append('Moderate')    
+        elif 100 <= value <= 200:
+            categories.append('High')
         else:
-            categories.append('Unhealthy')
+            categories.append('Severe')
     return categories
 
 def predict_air_quality(data):
@@ -156,10 +168,10 @@ def generate_pdf(data, filename):
 
     # General summary
     total_records = len(data)
-    exceeds_who_count = data['Exceeds_WHO'].sum()
+    
     
     pdf.cell(0, 10, f'Total records processed: {total_records}', ln=True)
-    pdf.cell(0, 10, f'Records exceeding WHO thresholds: {exceeds_who_count}', ln=True)
+
     pdf.ln(10)
 
     # Pollutant-specific summary
